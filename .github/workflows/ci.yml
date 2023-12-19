@@ -11,3 +11,9 @@ jobs:
     uses: ash-project/ash/.github/workflows/ash-ci.yml@main
     secrets:
       HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+  ash-3-ci:
+    uses: ash-project/ash/.github/workflows/ash-ci.yml@main
+    secrets:
+      HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+    env:
+      FLAG_ASH_THREE: true

@@ -1,0 +1,236 @@
+name: Ash 3 CI
+on:
+  workflow_call:
+    secrets:
+      HEX_API_KEY:
+        required: false
+    inputs:
+      spark-formatter:
+        type: boolean
+        default: true
+      spark-cheat-sheets:
+        type: boolean
+        default: true
+      sobelow:
+        type: boolean
+        default: true
+      postgres:
+        type: boolean
+        default: false
+      postgres-version:
+        type: string
+        default: "13"
+      sqlite:
+        type: boolean
+        default: false
+      hex-api-key:
+        type: string
+jobs:
+  deps:
+    name: mix deps.get
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-deps-get@main
+
+  auditor:
+    name: mix hex.audit
+    runs-on: ubuntu-latest
+    needs: deps
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-hex-audit@main
+
+  build-test:
+    name: MIX_ENV=test mix.compile
+    runs-on: ubuntu-latest
+    needs: deps
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/install-elixir@main
+      - uses: team-alembic/staple-actions/actions/mix-compile@main
+        with:
+          mix-env: test
+  formatter:
+    name: mix format --check-formatted
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-format@main
+        with:
+          mix-env: test
+
+  spark-formatter:
+    name: mix spark.formatter --check
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        if: ${{inputs.spark-formatter}}
+        with:
+          mix-env: test
+          task: spark.formatter --check
+
+  spark-cheat-sheets:
+    name: mix spark.cheat_sheets --check
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        if: ${{inputs.spark-cheat-sheets}}
+        with:
+          mix-env: test
+          task: spark.cheat_sheets --check
+  sobelow:
+    name: mix sobelow
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        if: ${{inputs.sobelow}}
+        with:
+          mix-env: test
+          task: sobelow
+  credo:
+    name: mix credo --strict
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-credo@main
+        if: ${{inputs.spark-formatter}}
+        with:
+          mix-env: test
+  unused-deps:
+    name: mix deps.unlock --check-unused
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: deps.unlock --check-unused
+
+  # Need to clean lots of things up before we can add this
+  # doctor:
+  #   name: mix doctor --full --raise
+  #   runs-on: ubuntu-latest
+  #   needs: build-test
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - uses: team-alembic/staple-actions/actions/mix-doctor@main
+  #       with:
+  #         mix-env: test
+
+  test:
+    name: mix test
+    runs-on: ubuntu-latest
+    needs: build-test
+    services:
+      postgres:
+        image: postgres:${{inputs.postgres-version}}
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_postgres.generate_migrations --check
+        if: ${{inputs.postgres}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_postgres.create
+        if: ${{inputs.postgres}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_postgres.migrate
+        if: ${{inputs.postgres}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_postgres.migrate --tenants
+        if: ${{inputs.postgres}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_sqlite.generate_migrations --check
+        if: ${{inputs.sqlite}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_sqlite.create
+        if: ${{inputs.sqlite}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_sqlite.migrate
+        if: ${{inputs.sqlite}}
+      - uses: team-alembic/staple-actions/actions/mix-task@main
+        with:
+          mix-env: test
+          task: ash_sqlite.migrate --tenants
+        if: ${{inputs.sqlite}}
+      - uses: team-alembic/staple-actions/actions/mix-test@main
+        with:
+          mix-env: test
+        env:
+          PGUSER: postgres
+          PGPASS: postgres
+          PGHOST: postgres
+
+  dialyzer:
+    name: mix dialyzer
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-dialyzer@main
+        with:
+          mix-env: dev
+
+  build-dev:
+    name: MIX_ENV=dev mix.compile
+    runs-on: ubuntu-latest
+    needs: deps
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-compile@main
+        with:
+          mix-env: dev
+  release:
+    needs:
+      - credo
+      - unused-deps
+      # - doctor
+      - spark-formatter
+      - sobelow
+      - formatter
+      - auditor
+      - test
+      - dialyzer
+      - build-dev
+      - deps
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    name: Release
+    steps:
+      - uses: actions/checkout@v3
+      - uses: team-alembic/staple-actions/actions/mix-hex-publish@main
+        with:
+          mix-env: dev
+          hex-api-key: ${{secrets.HEX_API_KEY}}
