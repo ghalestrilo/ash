@@ -12,8 +12,7 @@ jobs:
     secrets:
       HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
   ash-3-ci:
-    env:
-      FLAG_ASH_THREE: true
     uses: ./.github/workflows/ash-3-ci.yml
     secrets:
       HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+      FLAG_ASH_THREE: true
