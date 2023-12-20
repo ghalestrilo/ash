@@ -4,6 +4,7 @@ on:
     secrets:
       HEX_API_KEY:
         required: false
+      FLAG_ASH_THREE: true
     inputs:
       spark-formatter:
         type: boolean
