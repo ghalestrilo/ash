@@ -239,6 +239,54 @@ defmodule Ash.Test.Changeset.ChangesetTest do
     end
   end
 
+  defmodule Note do
+    @moduledoc false
+    use Ash.Resource, data_layer: Ash.DataLayer.Ets
+
+    ets do
+      private?(true)
+    end
+
+    actions do
+      defaults [:read, :create, :update, :destroy]
+    end
+
+    attributes do
+      uuid_primary_key :id
+      attribute :body, :string
+      attribute :type, :string
+      attribute :member_id, :uuid
+    end
+
+    relationships do
+      belongs_to :member, Member, destination_attribute: :member_id
+    end
+  end
+
+  defmodule Member do
+    @moduledoc false
+    use Ash.Resource, data_layer: Ash.DataLayer.Ets
+
+    ets do
+      private?(true)
+    end
+
+    actions do
+      defaults [:read, :create, :update, :destroy]
+    end
+
+    attributes do
+      uuid_primary_key :id
+      attribute :name, :string
+      attribute :roles, {:array, :string}
+      attribute :active, :boolean
+    end
+
+    relationships do
+      has_many :notes, Note, destination_attribute: :member_id
+    end
+  end
+
   defmodule NonResource do
     @moduledoc false
     defstruct [:name]
@@ -689,6 +737,55 @@ defmodule Ash.Test.Changeset.ChangesetTest do
       |> Api.update!()
 
       assert [%{title: "new_title"}, %{title: "new_title"}] = Api.read!(Post)
+    end
+
+    test "delete note", ctx do
+      # actor = insert_member(name: "Actor", active: true, roles: ["members"])
+      actor =
+        Member
+        |> Changeset.new(%{name: "Actor", active: true, roles: ["members"]})
+        |> Api.create!()
+
+      # insert_member(name: "Member", active: true)
+      # actor =
+      member =
+        Member
+        |> Changeset.new(%{name: "Member", active: true})
+        |> Api.create!()
+
+      # insert_note(actor: actor, body: "new note", type: "member-internal", member_id: member.id)
+      note =
+        Note
+        |> Changeset.new(%{body: "new note", type: "member-internal"})
+        # |> Changeset.new(%{body: "new note", type: "member-internal", member_id: member.id})
+        |> Ash.Changeset.manage_relationship(:member, member)
+        |> Api.create!()
+
+      # String note.id works for `manage_relationship(:notes, [note_attrs], type: :append)`, below
+      note_attrs = %{id: to_string(note.id), body: "updated note"}
+
+      member =
+        member
+        |> Ash.Changeset.for_update(:update, %{}, actor: actor)
+        |> Ash.Changeset.manage_relationship(:notes, [note_attrs], type: :append)
+        |> MyApp.AshApi.update!()
+        |> MyApp.AshApi.load!(:notes, authorize?: false)
+
+      assert [updated_note] = member.notes
+      assert updated_note.body == "updated note"
+
+      # String note.id fails for `manage_relationship(:notes, [note_attrs], type: {:destroy, _})`, below
+      note_attrs = %{id: to_string(note.id)}
+
+      member =
+        member
+        |> Ash.Changeset.for_update(:update, %{}, actor: actor)
+        |> Ash.Changeset.manage_relationship(:notes, [note_attrs], on_match: {:destroy, :destroy})
+        |> MyApp.AshApi.update!()
+        |> MyApp.AshApi.load!(:notes, authorize?: false)
+
+      # Fails. Note is not deleted
+      assert member.notes == []
     end
   end
 
